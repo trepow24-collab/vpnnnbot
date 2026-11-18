@@ -36,39 +36,44 @@ db = Database()
 user_states = {}
 
 
+def blue_button(**kwargs):
+    """Создаёт синюю inline-кнопку Telegram (style=primary)."""
+    return InlineKeyboardButton(style="primary", **kwargs)
+
+
 def main_menu(user_id: int):
     # Кнопки расположены в две колонки: слева и справа.
     rows = [
-        [InlineKeyboardButton(text="Купить VPN", callback_data="menu_buy"),
-         InlineKeyboardButton(text="Мой VPN", callback_data="menu_my_vpn")],
-        [InlineKeyboardButton(text="Пробный период", callback_data="menu_trial"),
-         InlineKeyboardButton(text="Тарифы", callback_data="menu_tariffs")],
-        [InlineKeyboardButton(text="Промокод", callback_data="menu_promo"),
-         InlineKeyboardButton(text="Рефералы", callback_data="menu_referral")],
+        [blue_button(text="Купить VPN", callback_data="menu_buy"),
+         blue_button(text="Мой VPN", callback_data="menu_my_vpn")],
+        [blue_button(text="Пробный период", callback_data="menu_trial"),
+         blue_button(text="Тарифы", callback_data="menu_tariffs")],
+        [blue_button(text="Промокод", callback_data="menu_promo"),
+         blue_button(text="Рефералы", callback_data="menu_referral")],
     ]
     links = []
     if SITE_URL:
-        links.append(InlineKeyboardButton(text="Наш сайт", url=SITE_URL))
+        links.append(blue_button(text="Наш сайт", url=SITE_URL))
     if SUPPORT_URL:
-        links.append(InlineKeyboardButton(text="Поддержка", url=SUPPORT_URL))
+        links.append(blue_button(text="Поддержка", url=SUPPORT_URL))
     if links:
         rows.append(links)
     if user_id == OWNER_ID:
-        rows.append([InlineKeyboardButton(text="Админ-панель", callback_data="menu_admin")])
+        rows.append([blue_button(text="Админ-панель", callback_data="menu_admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def subscription_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подписаться на канал", url=CHANNEL_URL)],
-        [InlineKeyboardButton(text="Проверить подписку", callback_data="check_subscription")]
+        [blue_button(text="Подписаться на канал", url=CHANNEL_URL)],
+        [blue_button(text="Проверить подписку", callback_data="check_subscription")]
     ])
 
 
 def plans_keyboard():
     buttons = []
     for key, plan in PLANS.items():
-        buttons.append([InlineKeyboardButton(
+        buttons.append([blue_button(
             text=f"{plan['name']} — {plan['price']} ₽", callback_data=f"buy_{key}"
         )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -76,24 +81,24 @@ def plans_keyboard():
 
 def payment_keyboard(order_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отменить заказ", callback_data=f"cancel_{order_id}")]
+        [blue_button(text="Отменить заказ", callback_data=f"cancel_{order_id}")]
     ])
 
 
 def admin_order_keyboard(order_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подтвердить оплату", callback_data=f"approve_{order_id}")],
-        [InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{order_id}")]
+        [blue_button(text="Подтвердить оплату", callback_data=f"approve_{order_id}")],
+        [blue_button(text="Отклонить", callback_data=f"reject_{order_id}")]
     ])
 
 
 def admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Статистика бота", callback_data="admin_stats"),
-         InlineKeyboardButton(text="Статистика VPN", callback_data="admin_vpn_stats")],
-        [InlineKeyboardButton(text="Ожидающие заявки", callback_data="admin_orders"),
-         InlineKeyboardButton(text="Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="Создать промокод", callback_data="admin_promo_help")]
+        [blue_button(text="Статистика бота", callback_data="admin_stats"),
+         blue_button(text="Статистика VPN", callback_data="admin_vpn_stats")],
+        [blue_button(text="Ожидающие заявки", callback_data="admin_orders"),
+         blue_button(text="Рассылка", callback_data="admin_broadcast")],
+        [blue_button(text="Создать промокод", callback_data="admin_promo_help")]
     ])
 
 
@@ -183,7 +188,7 @@ async def create_client_with_bonus(user_id: int, base_days: int, order_id: int, 
     return sub_url, total_days
 
 
-@dp.message(CommandStart(deep_link=True))
+@dp.message(CommandStart())
 async def start(message: Message, command: CommandObject):
     is_new = await db.add_user(message.from_user)
     if is_new and command.args and command.args.startswith("ref_"):
@@ -212,12 +217,15 @@ async def start(message: Message, command: CommandObject):
         return
     await message.answer(
         "<b>TREPOW VPN — свобода в интернете без границ</b>\n\n"
-        "<b>Что ты получаешь:</b>\n"
-        "<b>• Доступ к сайтам, Telegram, YouTube, Twitch и Discord</b>\n"
-        "<b>• Быстрый и стабильный интернет</b>\n"
-        "<b>• Android, iOS, Windows, macOS и Linux</b>\n"
-        "<b>• Установка за 2 минуты</b>\n"
-        "<b>• Шифрование и защита трафика</b>",
+        "<b>Доступ ко всем сайтам, Telegram, YouTube, Twitch, Discord</b>\n"
+        "<b>Быстрый и стабильный интернет</b>\n"
+        "<b>Поддержка Android, iOS, Windows, macOS, Linux</b>\n"
+        "<b>Установка за 2 минуты</b>\n"
+        "<b>Шифрование и защита трафика</b>\n\n"
+        "<b>TREPOW VPN — доступ на выбранный срок</b>\n"
+        "<b>Пошаговая инструкция</b>\n"
+        "<b>Поддержка в Telegram</b>\n"
+        "<b>Безлимитный интернет без границ</b>",
         reply_markup=main_menu(message.from_user.id)
     )
 
