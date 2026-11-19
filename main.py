@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardRemove
+    ReplyKeyboardRemove, FSInputFile
 )
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -34,6 +34,23 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 db = Database()
 user_states = {}
+START_PHOTO = os.path.join("assets", "trepow_vpn_start.jpg")
+DEVICE_LIMIT = 2
+
+def back_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[blue_button(text="⬅️ Назад", callback_data="back_home")]])
+
+async def render_callback(call: CallbackQuery, text: str, reply_markup=None):
+    try:
+        if call.message.photo:
+            await call.message.edit_caption(caption=text, reply_markup=reply_markup)
+        else:
+            await call.message.edit_text(text=text, reply_markup=reply_markup)
+    except Exception as exc:
+        if "message is not modified" not in str(exc).lower():
+            logging.warning("Не удалось обновить экран: %s", exc)
+            await call.message.answer(text, reply_markup=reply_markup)
+
 
 
 def blue_button(**kwargs):
@@ -215,25 +232,28 @@ async def start(message: Message, command: CommandObject):
         pass
     if not await subscription_required(message):
         return
-    await message.answer(
-        "<b>TREPOW VPN — свобода в интернете без границ</b>\n\n"
-        "<b>Доступ ко всем сайтам, Telegram, YouTube, Twitch, Discord</b>\n"
-        "<b>Быстрый и стабильный интернет</b>\n"
-        "<b>Поддержка Android, iOS, Windows, macOS, Linux</b>\n"
-        "<b>Установка за 2 минуты</b>\n"
-        "<b>Шифрование и защита трафика</b>\n\n"
-        "<b>TREPOW VPN — доступ на выбранный срок</b>\n"
-        "<b>Пошаговая инструкция</b>\n"
-        "<b>Поддержка в Telegram</b>\n"
-        "<b>Безлимитный интернет без границ</b>",
-        reply_markup=main_menu(message.from_user.id)
+    welcome_text = (
+        "<b>TREPOW VPN — свобода в интернете без границ</b>\\n\\n"
+        "<b>• Доступ ко всем сайтам, Telegram, YouTube, Twitch, Discord</b>\\n"
+        "<b>• Быстрый и стабильный интернет</b>\\n"
+        "<b>• Поддержка Android, iOS, Windows, macOS, Linux</b>\\n"
+        "<b>• Установка за 2 минуты</b>\\n"
+        "<b>• Шифрование и защита трафика</b>\\n\\n"
+        "<b>TREPOW VPN — доступ на выбранный срок</b>\\n"
+        "<b>Пошаговая инструкция • Поддержка в Telegram</b>\\n"
+        "<b>Безлимитный интернет без границ</b>"
     )
+    if os.path.exists(START_PHOTO):
+        await message.answer_photo(FSInputFile(START_PHOTO), caption=welcome_text,
+                                   reply_markup=main_menu(message.from_user.id))
+    else:
+        await message.answer(welcome_text, reply_markup=main_menu(message.from_user.id))
 
 
 @dp.callback_query(F.data == "check_subscription")
 async def check_subscription(call: CallbackQuery):
     if await is_subscribed(call.from_user.id):
-        await call.message.answer("<b>Подписка подтверждена.</b>", reply_markup=main_menu(call.from_user.id))
+        await render_callback(call, "<b>Подписка подтверждена.</b>", main_menu(call.from_user.id))
         await call.answer()
     else:
         await call.answer("Сначала подпишись на @trepowvpn.", show_alert=True)
@@ -267,11 +287,13 @@ async def menu_trial(call: CallbackQuery):
 async def menu_referral(call: CallbackQuery):
     link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{call.from_user.id}"
     count = await db.get_referral_count(call.from_user.id)
-    await call.message.answer(
+    await render_callback(
+        call,
         "<b>Реферальная программа TREPOW VPN</b>\n\n"
         "Приглашай друзей по своей ссылке. За каждого нового пользователя начисляется 2 дня VPN.\n\n"
         f"Твоя ссылка:\n<code>{link}</code>\n\n"
-        f"Приглашено: <b>{count}</b>"
+        f"Приглашено: <b>{count}</b>",
+        back_keyboard()
     )
     await call.answer()
 
@@ -279,7 +301,7 @@ async def menu_referral(call: CallbackQuery):
 @dp.callback_query(F.data == "menu_promo")
 async def menu_promo(call: CallbackQuery):
     user_states[call.from_user.id] = {"state": "promo"}
-    await call.message.answer("Отправь промокод одним сообщением.")
+    await render_callback(call, "<b>Отправь промокод одним сообщением.</b>", back_keyboard())
     await call.answer()
 
 
@@ -334,7 +356,9 @@ async def menu_buy(call: CallbackQuery):
     if not await is_subscribed(call.from_user.id):
         await call.answer("Сначала подпишись на канал!", show_alert=True)
         return
-    await call.message.answer("<b>Выбери тариф TREPOW VPN:</b>", reply_markup=plans_keyboard())
+    kb = plans_keyboard()
+    kb.inline_keyboard.append([blue_button(text="⬅️ Назад", callback_data="back_home")])
+    await render_callback(call, "<b>Выбери тариф TREPOW VPN:</b>", kb)
     await call.answer()
 
 
@@ -346,7 +370,7 @@ async def menu_tariffs(call: CallbackQuery):
     text = "<b>Тарифы TREPOW VPN</b>\n\n" + "\n".join(
         f"{p['name']} — <b>{p['price']} ₽</b>" for p in PLANS.values()
     )
-    await call.message.answer(text)
+    await render_callback(call, text, back_keyboard())
     await call.answer()
 
 
@@ -356,14 +380,34 @@ async def menu_my_vpn(call: CallbackQuery):
         await call.answer("Сначала подпишись на канал!", show_alert=True)
         return
     clients = await db.get_user_vpn(call.from_user.id)
+    username = f"@{call.from_user.username}" if call.from_user.username else "не указан"
+    text = (
+        "<b>ВАШ АККАУНТ TREPOW VPN</b>\\n\\n"
+        f"<b>Имя:</b> {call.from_user.full_name}\\n"
+        f"<b>Username:</b> {username}\\n"
+        f"<b>ID:</b> <code>{call.from_user.id}</code>\\n\\n"
+    )
     if not clients:
-        await call.message.answer("У тебя пока нет VPN-профилей.")
+        text += "<b>VPN-профиль пока не создан.</b>\\nВыбери тариф или активируй пробный период."
     else:
-        for client in clients:
-            await call.message.answer(
-                "<b>Твой VPN-профиль</b>\n\n"
-                f"Ссылка подписки:\n<code>{client['sub_url']}</code>\n\nУстройства: 2"
-            )
+        client = clients[0]
+        text += (
+            "<b>Статус:</b> Активный профиль\\n"
+            f"<b>Устройства:</b> 0 из {DEVICE_LIMIT}\\n"
+            f"<b>Можно добавить:</b> {DEVICE_LIMIT}\\n\\n"
+            "<b>Ссылка для подключения:</b>\\n"
+            f"<code>{client['sub_url']}</code>\\n\\n"
+            "<i>Важно: текущий H1 API не сообщает боту число реально подключённых устройств. "
+            "Здесь указан лимит и доступные слоты.</i>"
+        )
+    await render_callback(call, text, back_keyboard())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "back_home")
+async def back_home(call: CallbackQuery):
+    await render_callback(call, "<b>TREPOW VPN — главное меню</b>\\n\\nВыбери нужный раздел:",
+                          main_menu(call.from_user.id))
     await call.answer()
 
 
