@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 import aiohttp
 
 from aiogram import Bot, Dispatcher, F
@@ -34,23 +35,23 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 db = Database()
 user_states = {}
-START_PHOTO = os.path.join("assets", "trepow_vpn_start.jpg")
-DEVICE_LIMIT = 2
+START_IMAGE = os.path.join(os.path.dirname(__file__), "assets", "trepow_vpn_start.jpg")
+WELCOME_TEXT = (
+    "<b>TREPOW VPN — свобода в интернете без границ</b>\n\n"
+    "• Доступ ко всем сайтам, Telegram, YouTube, Twitch, Discord\n"
+    "• Быстрый и стабильный интернет\n"
+    "• Поддержка Android, iOS, Windows, macOS, Linux\n"
+    "• Установка за 2 минуты\n"
+    "• Шифрование и защита трафика\n\n"
+    "<b>TREPOW VPN — доступ на выбранный срок</b>\n"
+    "Пошаговая инструкция • Поддержка в Telegram\n"
+    "Безлимитный интернет без границ"
+)
 
 def back_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[blue_button(text="⬅️ Назад", callback_data="back_home")]])
-
-async def render_callback(call: CallbackQuery, text: str, reply_markup=None):
-    try:
-        if call.message.photo:
-            await call.message.edit_caption(caption=text, reply_markup=reply_markup)
-        else:
-            await call.message.edit_text(text=text, reply_markup=reply_markup)
-    except Exception as exc:
-        if "message is not modified" not in str(exc).lower():
-            logging.warning("Не удалось обновить экран: %s", exc)
-            await call.message.answer(text, reply_markup=reply_markup)
-
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button(text="⬅️ Назад в меню", callback_data="back_main")]
+    ])
 
 
 def blue_button(**kwargs):
@@ -115,7 +116,10 @@ def admin_keyboard():
          blue_button(text="Статистика VPN", callback_data="admin_vpn_stats")],
         [blue_button(text="Ожидающие заявки", callback_data="admin_orders"),
          blue_button(text="Рассылка", callback_data="admin_broadcast")],
-        [blue_button(text="Создать промокод", callback_data="admin_promo_help")]
+        [blue_button(text="Выдать подписку", callback_data="admin_grant"),
+         blue_button(text="Забрать подписку", callback_data="admin_revoke")],
+        [blue_button(text="Создать промокод", callback_data="admin_promo_help")],
+        [blue_button(text="⬅️ Главное меню", callback_data="back_main")]
     ])
 
 
@@ -215,46 +219,41 @@ async def start(message: Message, command: CommandObject):
                 created = await db.add_referral(referrer_id, message.from_user.id)
                 if created:
                     result = await extend_user_vpn_or_credit(referrer_id, REFERRAL_DAYS)
+                    note = ("За приглашённого друга начислено 2 дня к VPN." if result == "extended"
+                            else "За приглашённого друга начислено 2 бонусных дня. Они добавятся к следующему VPN.")
                     try:
-                        if result == "extended":
-                            await bot.send_message(referrer_id, "За приглашённого друга начислено 2 дня к VPN.")
-                        else:
-                            await bot.send_message(referrer_id, "За приглашённого друга начислено 2 бонусных дня. Они добавятся к следующему VPN.")
+                        await bot.send_message(referrer_id, note, reply_markup=back_keyboard())
                     except Exception:
-                        pass
-        except (ValueError, Exception):
+                        logging.info("Не удалось отправить уведомление рефереру %s", referrer_id)
+        except Exception:
             logging.exception("Не удалось обработать реферальную ссылку")
 
-    cleanup = await message.answer("Обновляю меню…", reply_markup=ReplyKeyboardRemove())
-    try:
-        await cleanup.delete()
-    except Exception:
-        pass
-    if not await subscription_required(message):
-        return
-    welcome_text = (
-        "<b>TREPOW VPN — свобода в интернете без границ</b>\\n\\n"
-        "<b>• Доступ ко всем сайтам, Telegram, YouTube, Twitch, Discord</b>\\n"
-        "<b>• Быстрый и стабильный интернет</b>\\n"
-        "<b>• Поддержка Android, iOS, Windows, macOS, Linux</b>\\n"
-        "<b>• Установка за 2 минуты</b>\\n"
-        "<b>• Шифрование и защита трафика</b>\\n\\n"
-        "<b>TREPOW VPN — доступ на выбранный срок</b>\\n"
-        "<b>Пошаговая инструкция • Поддержка в Telegram</b>\\n"
-        "<b>Безлимитный интернет без границ</b>"
+    # На /start отправляем один экран: изображение + приветственный текст + меню.
+    subscribed = await is_subscribed(message.from_user.id)
+    markup = main_menu(message.from_user.id) if subscribed else subscription_keyboard()
+    caption = WELCOME_TEXT if subscribed else (
+        WELCOME_TEXT + "\n\n<b>Чтобы пользоваться ботом, подпишись на канал @trepowvpn.</b>"
     )
-    if os.path.exists(START_PHOTO):
-        await message.answer_photo(FSInputFile(START_PHOTO), caption=welcome_text,
-                                   reply_markup=main_menu(message.from_user.id))
-    else:
-        await message.answer(welcome_text, reply_markup=main_menu(message.from_user.id))
+    try:
+        photo = FSInputFile(START_IMAGE)
+        await message.answer_photo(photo=photo, caption=caption, reply_markup=markup)
+    except Exception:
+        logging.exception("Не удалось отправить стартовую фотографию")
+        await message.answer(caption, reply_markup=markup)
+
+
+@dp.callback_query(F.data == "back_main")
+async def back_main(call: CallbackQuery):
+    user_states.pop(call.from_user.id, None)
+    await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(call.from_user.id))
+    await call.answer()
 
 
 @dp.callback_query(F.data == "check_subscription")
 async def check_subscription(call: CallbackQuery):
     if await is_subscribed(call.from_user.id):
-        await render_callback(call, "<b>Подписка подтверждена.</b>", main_menu(call.from_user.id))
-        await call.answer()
+        await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(call.from_user.id))
+        await call.answer("Подписка подтверждена")
     else:
         await call.answer("Сначала подпишись на @trepowvpn.", show_alert=True)
 
@@ -285,15 +284,15 @@ async def menu_trial(call: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_referral")
 async def menu_referral(call: CallbackQuery):
-    link = f"https://t.me/{(await bot.get_me()).username}?start=ref_{call.from_user.id}"
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=ref_{call.from_user.id}"
     count = await db.get_referral_count(call.from_user.id)
-    await render_callback(
-        call,
+    await call.message.answer(
         "<b>Реферальная программа TREPOW VPN</b>\n\n"
         "Приглашай друзей по своей ссылке. За каждого нового пользователя начисляется 2 дня VPN.\n\n"
         f"Твоя ссылка:\n<code>{link}</code>\n\n"
         f"Приглашено: <b>{count}</b>",
-        back_keyboard()
+        reply_markup=back_keyboard()
     )
     await call.answer()
 
@@ -301,7 +300,7 @@ async def menu_referral(call: CallbackQuery):
 @dp.callback_query(F.data == "menu_promo")
 async def menu_promo(call: CallbackQuery):
     user_states[call.from_user.id] = {"state": "promo"}
-    await render_callback(call, "<b>Отправь промокод одним сообщением.</b>", back_keyboard())
+    await call.message.answer("Отправь промокод одним сообщением.", reply_markup=back_keyboard())
     await call.answer()
 
 
@@ -321,9 +320,9 @@ async def redeem_promo_message(message: Message, code: str):
     try:
         days = await db.redeem_promo(code.upper(), message.from_user.id)
         await extend_user_vpn_or_credit(message.from_user.id, days)
-        await message.answer(f"Промокод активирован. Начислено {days} дней VPN.")
+        await message.answer(f"Промокод активирован. Начислено {days} дней VPN.", reply_markup=back_keyboard())
     except ValueError as error:
-        await message.answer(str(error))
+        await message.answer(str(error), reply_markup=back_keyboard())
     except Exception:
         logging.exception("Ошибка активации промокода")
         await message.answer("Не удалось активировать промокод. Попробуй позже.")
@@ -356,9 +355,7 @@ async def menu_buy(call: CallbackQuery):
     if not await is_subscribed(call.from_user.id):
         await call.answer("Сначала подпишись на канал!", show_alert=True)
         return
-    kb = plans_keyboard()
-    kb.inline_keyboard.append([blue_button(text="⬅️ Назад", callback_data="back_home")])
-    await render_callback(call, "<b>Выбери тариф TREPOW VPN:</b>", kb)
+    await call.message.answer("<b>Выбери тариф TREPOW VPN:</b>", reply_markup=plans_keyboard())
     await call.answer()
 
 
@@ -370,7 +367,7 @@ async def menu_tariffs(call: CallbackQuery):
     text = "<b>Тарифы TREPOW VPN</b>\n\n" + "\n".join(
         f"{p['name']} — <b>{p['price']} ₽</b>" for p in PLANS.values()
     )
-    await render_callback(call, text, back_keyboard())
+    await call.message.answer(text)
     await call.answer()
 
 
@@ -380,34 +377,14 @@ async def menu_my_vpn(call: CallbackQuery):
         await call.answer("Сначала подпишись на канал!", show_alert=True)
         return
     clients = await db.get_user_vpn(call.from_user.id)
-    username = f"@{call.from_user.username}" if call.from_user.username else "не указан"
-    text = (
-        "<b>ВАШ АККАУНТ TREPOW VPN</b>\\n\\n"
-        f"<b>Имя:</b> {call.from_user.full_name}\\n"
-        f"<b>Username:</b> {username}\\n"
-        f"<b>ID:</b> <code>{call.from_user.id}</code>\\n\\n"
-    )
     if not clients:
-        text += "<b>VPN-профиль пока не создан.</b>\\nВыбери тариф или активируй пробный период."
+        await call.message.answer("У тебя пока нет VPN-профилей.")
     else:
-        client = clients[0]
-        text += (
-            "<b>Статус:</b> Активный профиль\\n"
-            f"<b>Устройства:</b> 0 из {DEVICE_LIMIT}\\n"
-            f"<b>Можно добавить:</b> {DEVICE_LIMIT}\\n\\n"
-            "<b>Ссылка для подключения:</b>\\n"
-            f"<code>{client['sub_url']}</code>\\n\\n"
-            "<i>Важно: текущий H1 API не сообщает боту число реально подключённых устройств. "
-            "Здесь указан лимит и доступные слоты.</i>"
-        )
-    await render_callback(call, text, back_keyboard())
-    await call.answer()
-
-
-@dp.callback_query(F.data == "back_home")
-async def back_home(call: CallbackQuery):
-    await render_callback(call, "<b>TREPOW VPN — главное меню</b>\\n\\nВыбери нужный раздел:",
-                          main_menu(call.from_user.id))
+        for client in clients:
+            await call.message.answer(
+                "<b>Твой VPN-профиль</b>\n\n"
+                f"Ссылка подписки:\n<code>{client['sub_url']}</code>\n\nУстройства: 2"
+            )
     await call.answer()
 
 
@@ -417,6 +394,32 @@ async def menu_admin(call: CallbackQuery):
         await call.answer("Нет доступа", show_alert=True)
         return
     await call.message.answer("<b>Панель администратора</b>", reply_markup=admin_keyboard())
+    await call.answer()
+
+
+@dp.callback_query(F.data == "admin_grant")
+async def admin_grant_start(call: CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    user_states[OWNER_ID] = {"state": "admin_grant"}
+    await call.message.answer(
+        "Отправь Telegram ID и количество дней через пробел.\n"
+        "Пример: <code>123456789 30</code>", reply_markup=back_keyboard()
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "admin_revoke")
+async def admin_revoke_start(call: CallbackQuery):
+    if call.from_user.id != OWNER_ID:
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    user_states[OWNER_ID] = {"state": "admin_revoke"}
+    await call.message.answer(
+        "Отправь Telegram ID пользователя, у которого нужно отключить VPN.\n"
+        "Пример: <code>123456789</code>", reply_markup=back_keyboard()
+    )
     await call.answer()
 
 
@@ -629,6 +632,60 @@ async def admin_broadcast(call: CallbackQuery):
 async def other_messages(message: Message):
     uid = message.from_user.id
     state = user_states.get(uid)
+    if uid == OWNER_ID and state and state.get("state") == "admin_grant":
+        parts = (message.text or "").split()
+        if len(parts) != 2 or not all(x.isdigit() for x in parts):
+            await message.answer("Неверный формат. Отправь: <code>TELEGRAM_ID ДНИ</code>", reply_markup=back_keyboard())
+            return
+        target_id, days = map(int, parts)
+        if target_id <= 0 or not (1 <= days <= 3650):
+            await message.answer("ID должен быть положительным, срок — от 1 до 3650 дней.", reply_markup=back_keyboard())
+            return
+        user_states.pop(OWNER_ID, None)
+        try:
+            clients = await db.get_user_vpn(target_id)
+            if clients:
+                await h1_request("PATCH", f"/clients/{clients[0]['client_name']}", {"days": days})
+                await db.add_vpn_days(target_id, days)
+                link = clients[0]["sub_url"]
+            else:
+                admin_order_id = -int(time.time())
+                link = await create_h1_client(target_id, days, admin_order_id, "_admin")
+            await bot.send_message(target_id, f"<b>Тебе выдана подписка TREPOW VPN на {days} дней.</b>\n\nСсылка:\n<code>{link}</code>")
+            await message.answer(f"Подписка выдана пользователю <code>{target_id}</code> на {days} дней.", reply_markup=admin_keyboard())
+        except Exception as error:
+            logging.exception("Ошибка ручной выдачи VPN")
+            await message.answer(f"Не удалось выдать подписку: <code>{error}</code>", reply_markup=admin_keyboard())
+        return
+    if uid == OWNER_ID and state and state.get("state") == "admin_revoke":
+        raw = (message.text or "").strip()
+        if not raw.isdigit() or int(raw) <= 0:
+            await message.answer("Отправь корректный Telegram ID пользователя.", reply_markup=back_keyboard())
+            return
+        target_id = int(raw)
+        user_states.pop(OWNER_ID, None)
+        clients = await db.get_user_vpn(target_id)
+        if not clients:
+            await message.answer("У пользователя нет сохранённой VPN-подписки.", reply_markup=admin_keyboard())
+            return
+        try:
+            # Отключаем профиль на стороне H1. Запись в БД удаляется только после успешного ответа API.
+            for client in clients:
+                await h1_request("DELETE", f"/clients/{client['client_name']}")
+            await db.delete_user_vpn(target_id)
+            try:
+                await bot.send_message(target_id, "<b>Твоя подписка TREPOW VPN отключена администратором.</b>")
+            except Exception:
+                pass
+            await message.answer(f"Подписка пользователя <code>{target_id}</code> отключена.", reply_markup=admin_keyboard())
+        except Exception as error:
+            logging.exception("Ошибка отключения VPN")
+            await message.answer(
+                "H1 API не подтвердил отключение. Записи в базе сохранены.\n"
+                f"Ошибка: <code>{error}</code>\n\nПроверь метод DELETE /clients/{'{'}client_name{'}'} в документации H1Cloud.",
+                reply_markup=admin_keyboard()
+            )
+        return
     if uid == OWNER_ID and state and state.get("state") == "broadcast":
         user_states.pop(OWNER_ID, None)
         user_ids = await db.get_user_ids()
