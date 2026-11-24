@@ -3,6 +3,8 @@ import logging
 import os
 import time
 import aiohttp
+from datetime import datetime, timezone
+from html import escape
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -377,6 +379,7 @@ async def menu_my_vpn(call: CallbackQuery):
         await call.answer("Сначала подпишись на канал!", show_alert=True)
         return
     clients = await db.get_user_vpn(call.from_user.id)
+<<<<<<< HEAD
     if not clients:
         await call.message.answer("У тебя пока нет VPN-профилей.")
     else:
@@ -384,6 +387,50 @@ async def menu_my_vpn(call: CallbackQuery):
             await call.message.answer(
                 "<b>Твой VPN-профиль</b>\n\n"
                 f"Ссылка подписки:\n<code>{client['sub_url']}</code>\n\nУстройства: 2"
+=======
+    username = f"@{call.from_user.username}" if call.from_user.username else "не указан"
+    if not clients:
+        await call.message.answer(
+            "<b>Мой VPN</b>\n\n"
+            f"Аккаунт: <code>{call.from_user.id}</code>\n"
+            f"Username: {escape(username)}\n\n"
+            "VPN-подписка пока не найдена. Выбери тариф или активируй пробный период.",
+            reply_markup=back_keyboard()
+        )
+    else:
+        for client in clients:
+            expires_raw = client.get("expires_at")
+            expires_label = "неизвестно"
+            status_label = "неизвестен"
+            remaining_label = "неизвестно"
+            if expires_raw:
+                try:
+                    expires = datetime.fromisoformat(expires_raw)
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=timezone.utc)
+                    now = datetime.now(timezone.utc)
+                    seconds_left = (expires - now).total_seconds()
+                    expires_label = expires.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+                    if seconds_left > 0:
+                        status_label = "активна"
+                        remaining_label = f"{max(1, int((seconds_left + 86399) // 86400))} дн."
+                    else:
+                        status_label = "истекла"
+                        remaining_label = "0 дн."
+                except (ValueError, TypeError):
+                    logging.exception("Некорректная дата окончания VPN для %s", call.from_user.id)
+            await call.message.answer(
+                "<b>Мой VPN — личный кабинет</b>\n\n"
+                f"Аккаунт: <code>{call.from_user.id}</code>\n"
+                f"Username: {escape(username)}\n"
+                f"Статус: <b>{status_label}</b>\n"
+                f"Окончание: <b>{expires_label}</b>\n"
+                f"Осталось: <b>{remaining_label}</b>\n"
+                "Лимит устройств: <b>2</b>\n\n"
+                f"Ссылка подписки:\n<code>{escape(client['sub_url'])}</code>\n\n"
+                "Добавь ссылку в приложение Happ.",
+                reply_markup=back_keyboard()
+>>>>>>> 6a10bf2 (Fix VPN bot messages and add subscription button)
             )
     await call.answer()
 
